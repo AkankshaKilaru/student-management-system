@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>Student Manager</title>
+
+<style>
+body {
+    font-family: Arial;
+    background: linear-gradient(to right, #667eea, #764ba2);
+    text-align: center;
+    color: white;
+}
+
+.container {
+    background: white;
+    color: black;
+    margin: 20px auto;
+    padding: 20px;
+    width: 75%;
+    border-radius: 10px;
+}
+
+input, button {
+    padding: 10px;
+    margin: 5px;
+}
+
+button {
+    background: #667eea;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+.delete-btn {
+    background: red;
+}
+
+table {
+    width: 100%;
+    margin-top: 20px;
+}
+
+th {
+    background: #667eea;
+    color: white;
+}
+
+#searchInput {
+    width: 50%;
+    border-radius: 8px;
+}
+</style>
+
+</head>
+
+<body>
+
+<h2>🎓 Student Management System</h2>
+
+<!-- LOGIN -->
+
+<div class="container" id="authSection">
+    <h2>👑 Admin Login</h2>
+
+<input id="adminUsername" placeholder="Username"><br>
+<input id="adminPassword" type="password" placeholder="Password"><br>
+<button onclick="loginAdmin()">Login</button>
+
+<p id="loginMsg"></p>
+
+</div>
+
+<!-- APP -->
+
+<div class="container" id="appSection" style="display:none;">
+    <h3>👑 Admin Dashboard</h3>
+
+<!-- SEARCH -->
+<input id="searchInput" placeholder="Search..." onkeyup="searchStudents()">
+
+<br>
+
+<!-- SORT -->
+<button onclick="sortByMarks(true)">Marks ↓</button>
+<button onclick="sortByMarks(false)">Marks ↑</button>
+<button onclick="sortByName(true)">Name A-Z</button>
+<button onclick="sortByName(false)">Name Z-A</button>
+<button onclick="sortByAttendance(true)">Attendance ↓</button>
+<button onclick="sortByAttendance(false)">Attendance ↑</button>
+
+<br>
+
+<!-- FORM -->
+<input id="hallticket" placeholder="Hall Ticket No">
+<input id="name" placeholder="Name">
+<input id="course" placeholder="Course">
+<input id="marks" placeholder="Marks">
+<input id="attendance" placeholder="Attendance %">
+<button id="submitBtn" onclick="addStudent()">Add Student</button>
+
+<!-- TABLE -->
+<table border="1">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Hall Ticket</th>
+            <th>Name</th>
+            <th>Course</th>
+            <th>Marks</th>
+            <th>Grade</th>
+            <th>Attendance</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody id="studentTable"></tbody>
+</table>
+
+<br>
+<button onclick="logout()">Logout</button>
+
+</div>
+
+<script>
+const API = "http://127.0.0.1:8000";
+
+let token = localStorage.getItem("token") || "";
+let editId = null;
+let studentsData = [];
+
+// AUTO LOGIN
+window.onload = () => {
+    if (token) {
+        document.getElementById("authSection").style.display = "none";
+        document.getElementById("appSection").style.display = "block";
+        loadStudents();
+    }
+};
+
+// LOGIN
+async function loginAdmin() {
+    const msg = document.getElementById("loginMsg");
+
+    const username = document.getElementById("adminUsername").value.trim();
+    const password = document.getElementById("adminPassword").value.trim();
+
+    const formData = new URLSearchParams();
+    formData.append("username", username);
+    formData.append("password", password);
+
+    const res = await fetch(API + "/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData
+    });
+
+    const data = await res.json();
+
+    if (!data.access_token) {
+        msg.style.color = "red";
+        msg.innerText = "Invalid login";
+        return;
+    }
+
+    token = data.access_token;
+    localStorage.setItem("token", token);
+
+    document.getElementById("authSection").style.display = "none";
+    document.getElementById("appSection").style.display = "block";
+
+    loadStudents();
+}
+
+// LOAD
+async function loadStudents() {
+    const res = await fetch(API + "/students/", {
+        headers: {
+            "Authorization": "Bearer " + token
+        }
+    });
+
+    if (!res.ok) {
+        alert("Session expired");
+        logout();
+        return;
+    }
+
+    const data = await res.json();
+
+    // merge UI fields
+    studentsData = data.map(s => ({
+        ...s,
+        hallticket: s.hallticket || "",
+        attendance: s.attendance || 0
+    }));
+
+    renderTable(studentsData);
+}
+
+// GRADE
+function getGrade(marks) {
+    if (marks >= 90) return "A";
+    if (marks >= 75) return "B";
+    if (marks >= 50) return "C";
+    return "Fail";
+}
+
+// RENDER
+function renderTable(data) {
+    let rows = "";
+
+    data.forEach(s => {
+        const grade = getGrade(s.marks);
+
+        let gradeColor = grade === "A" ? "green" :
+                         grade === "B" ? "blue" :
+                         grade === "C" ? "orange" : "red";
+
+        let attColor = s.attendance >= 75 ? "green" :
+                       s.attendance >= 50 ? "orange" : "red";
+
+        rows += `
+        <tr>
+            <td>${s.id}</td>
+            <td>${s.hallticket}</td>
+            <td>${s.name}</td>
+            <td>${s.course}</td>
+            <td>${s.marks}</td>
+            <td style="color:${gradeColor}; font-weight:bold;">${grade}</td>
+            <td style="color:${attColor}; font-weight:bold;">${s.attendance}%</td>
+            <td>
+                <button onclick="editStudent(${s.id})">Edit</button>
+                <button class="delete-btn" onclick="deleteStudent(${s.id})">Delete</button>
+            </td>
+        </tr>`;
+    });
+
+    document.getElementById("studentTable").innerHTML = rows;
+}
+
+// SEARCH
+function searchStudents() {
+    const input = document.getElementById("searchInput").value.toLowerCase();
+
+    const filtered = studentsData.filter(s =>
+        s.name.toLowerCase().includes(input) ||
+        s.course.toLowerCase().includes(input) ||
+        s.hallticket.toLowerCase().includes(input)
+    );
+
+    renderTable(filtered);
+}
+
+// SORT
+function sortByMarks(desc = true) {
+    studentsData.sort((a, b) => desc ? b.marks - a.marks : a.marks - b.marks);
+    renderTable(studentsData);
+}
+
+function sortByName(asc = true) {
+    studentsData.sort((a, b) =>
+        asc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
+    );
+    renderTable(studentsData);
+}
+function sortByAttendance(desc = true) {
+    studentsData.sort((a, b) => {
+        const attA = a.attendance || 0;
+        const attB = b.attendance || 0;
+
+        return desc ? attB - attA : attA - attB;
+    });
+
+    renderTable(studentsData);
+}
+
+// ADD / UPDATE
+async function addStudent() {
+    const hallticket = document.getElementById("hallticket").value;
+    const name = document.getElementById("name").value;
+    const course = document.getElementById("course").value;
+    const marks = document.getElementById("marks").value;
+    const attendance = document.getElementById("attendance").value;
+
+    if (!hallticket || !name || !course || !marks || !attendance) {
+        alert("All fields required");
+        return;
+    }
+
+    const newStudent = {
+        id: editId || Date.now(),
+        hallticket,
+        name,
+        course,
+        marks: parseInt(marks),
+        attendance: parseInt(attendance)
+    };
+
+    if (editId) {
+        studentsData = studentsData.map(s => s.id === editId ? newStudent : s);
+    } else {
+        studentsData.push(newStudent);
+    }
+
+    editId = null;
+    renderTable(studentsData);
+
+    document.getElementById("hallticket").value = "";
+    document.getElementById("name").value = "";
+    document.getElementById("course").value = "";
+    document.getElementById("marks").value = "";
+    document.getElementById("attendance").value = "";
+}
+
+// EDIT
+function editStudent(id) {
+    const s = studentsData.find(s => s.id === id);
+
+    document.getElementById("hallticket").value = s.hallticket;
+    document.getElementById("name").value = s.name;
+    document.getElementById("course").value = s.course;
+    document.getElementById("marks").value = s.marks;
+    document.getElementById("attendance").value = s.attendance;
+
+    editId = id;
+}
+
+// DELETE
+function deleteStudent(id) {
+    if (!confirm("Are you sure?")) return;
+    studentsData = studentsData.filter(s => s.id !== id);
+    renderTable(studentsData);
+}
+
+// LOGOUT
+function logout() {
+    localStorage.removeItem("token");
+    location.reload();
+}
+</script>
+
+</body>
+</html>
